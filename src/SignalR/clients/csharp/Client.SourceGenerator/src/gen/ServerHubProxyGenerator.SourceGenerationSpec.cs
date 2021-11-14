@@ -4,11 +4,10 @@
 using System;
 using System.Collections.Generic;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace Microsoft.AspNetCore.SignalR.Client.SourceGenerator;
 
-internal partial class HubServerProxyGenerator
+internal partial class ServerHubProxyGenerator
 {
     public class SourceGenerationSpec
     {

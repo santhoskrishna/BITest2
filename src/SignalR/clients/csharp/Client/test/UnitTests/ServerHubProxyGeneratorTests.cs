@@ -1,30 +1,18 @@
 // Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
 using System.Threading.Channels;
-using System.Threading.Tasks;
 using Moq;
-using Xunit;
 
 namespace Microsoft.AspNetCore.SignalR.Client.Tests;
 
-[AttributeUsage(AttributeTargets.Method)]
-internal class HubServerProxyAttribute : Attribute
-{
-
-}
-
 internal static partial class HubServerProxyExtensions
 {
-    [HubServerProxy]
+    [ServerHubProxy]
     public static partial T GetHubServer<T>(this HubConnection conn);
 }
 
-public class HubServerProxyGeneratorTests
+public class ServerHubProxyGeneratorTests
 {
     public interface IMyHub
     {
