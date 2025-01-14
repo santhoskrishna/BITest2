@@ -58,6 +58,12 @@ public static class OpenApiEndpointConventionBuilderExtensions
         return builder;
     }
 
+    public static TBuilder WithOpenApiTransformer<TBuilder>(this TBuilder builder, Func<OpenApiOperation, OpenApiOperationTransformerContext, CancellationToken, Task> transformer) where TBuilder : IEndpointConventionBuilder
+    {
+        builder.WithMetadata(new DelegateOpenApiOperationTransformer(transformer));
+        return builder;
+    }
+
     [RequiresDynamicCode(TrimWarningMessage)]
     [RequiresUnreferencedCode(TrimWarningMessage)]
     private static void AddAndConfigureOperationForEndpoint(EndpointBuilder endpointBuilder, Func<OpenApiOperation, OpenApiOperation>? configure = null)
