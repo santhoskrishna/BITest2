@@ -3,6 +3,7 @@
 
 import { synchronizeDomContent } from '../Rendering/DomMerging/DomSync';
 import { attachProgrammaticEnhancedNavigationHandler, handleClickForNavigationInterception, hasInteractiveRouter, isForSamePath, isSamePageWithHash, notifyEnhancedNavigationListeners, performScrollToElementOnTheSamePage } from './NavigationUtils';
+import { resetScrollAfterNextBatch, resetScrollIfNeeded } from '../Rendering/Renderer';
 
 /*
 In effect, we have two separate client-side navigation mechanisms:
@@ -70,14 +71,35 @@ export function detachProgressivelyEnhancedNavigationListener() {
   window.removeEventListener('popstate', onPopState);
 }
 
-function performProgrammaticEnhancedNavigation(absoluteInternalHref: string, replace: boolean) {
+function performProgrammaticEnhancedNavigation(absoluteInternalHref: string, replace: boolean) : void {
+  let isSelfNavigation = isForSamePath(absoluteInternalHref, location.href);
+
+  performEnhancedPageLoad(absoluteInternalHref, /* interceptedLink */ false);
+
+  if (!isSelfNavigation) {
+    resetScrollAfterNextBatch();
+  }
+
+  // history update should be the last step - same as in client side routing
   if (replace) {
     history.replaceState(null, /* ignored title */ '', absoluteInternalHref);
   } else {
     history.pushState(null, /* ignored title */ '', absoluteInternalHref);
   }
+}
 
-  performEnhancedPageLoad(absoluteInternalHref, /* interceptedLink */ false);
+function getCurrentScrollPosition() {
+  const scrollPositionX = window.scrollX;
+  const scrollPositionY = window.scrollY;
+  return { X: scrollPositionX, Y: scrollPositionY };
+}
+
+function saveScrollPosition() {
+  const currentState = history.state || {};
+  const scrollPosition = getCurrentScrollPosition();
+  // save the current scroll position
+  const updatedState = { ...currentState, scrollPosition: scrollPosition };
+  history.replaceState(updatedState, /* ignored title */ '', location.href);
 }
 
 function onDocumentClick(event: MouseEvent) {
@@ -90,14 +112,23 @@ function onDocumentClick(event: MouseEvent) {
   }
 
   handleClickForNavigationInterception(event, absoluteInternalHref => {
+    saveScrollPosition();
     const shouldScrollToHash = isSamePageWithHash(absoluteInternalHref);
-    history.pushState(null, /* ignored title */ '', absoluteInternalHref);
 
     if (shouldScrollToHash) {
       performScrollToElementOnTheSamePage(absoluteInternalHref);
     } else {
+      let isSelfNavigation = isForSamePath(absoluteInternalHref, location.href);
+      if (!isSelfNavigation) {
+        resetScrollAfterNextBatch();
+      }
       performEnhancedPageLoad(absoluteInternalHref, /* interceptedLink */ true);
+      if (!isSelfNavigation) {
+        resetScrollIfNeeded();
+      }
     }
+
+    history.pushState(null, /* ignored title */ '', absoluteInternalHref);
   });
 }
 
@@ -106,7 +137,15 @@ function onPopState(state: PopStateEvent) {
     return;
   }
 
-  performEnhancedPageLoad(location.href, /* interceptedLink */ false);
+  // load the new page
+  const scrollPosition = history.state?.scrollPosition;
+  saveScrollPosition();
+  performEnhancedPageLoad(location.href, /* interceptedLink */ false).then(() => {
+    if (scrollPosition !== undefined &&
+      (scrollPosition.X !== window.scrollX || scrollPosition.Y !== window.scrollY)) {
+      window.scrollTo(scrollPosition.X, scrollPosition.Y);
+    }
+  })
 }
 
 function onDocumentSubmit(event: SubmitEvent) {

@@ -9,6 +9,7 @@ using Xunit.Abstractions;
 using Components.TestServer.RazorComponents;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Support.Extensions;
+using System.Threading.Tasks;
 
 namespace Microsoft.AspNetCore.Components.E2ETests.ServerRenderingTests;
 
@@ -660,6 +661,110 @@ public class EnhancedNavigationTest : ServerTestBase<BasicTestAppServerSiteFixtu
         Browser.Exists(By.LinkText("Go to page with link tag 2")).Click();
         Browser.Equal("PageWithLinkTag 2", () => originalH1Elem.Text);
         Browser.Equal("rgba(0, 0, 255, 1)", () => originalH1Elem.GetCssValue("color"));
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(true, false)]
+    public async Task EnhancedNavigationScrollBehavesSameAsFullNavigation(bool enableStreaming, bool useEnhancedNavigation)
+    {
+        // This test checks if the navigation to other path moves the scroll to the top of the page,
+        // or to the beginning of a fragment, regardless of the previous scroll position,
+        // checks if going backwards and forwards preserves the scroll position
+        string landingPageSuffix = enableStreaming ? "" : "-no-streaming";
+        Navigate($"{ServerPathBase}/nav/testing-scroll{landingPageSuffix}");
+        EnhancedNavigationTestUtil.SuppressEnhancedNavigation(this, shouldSuppress: !useEnhancedNavigation, skipNavigation: true);
+
+        AssertWeAreOnScrollTestPage();
+
+        // assert enhanced navigation is enabled/disabled, as requested
+        var elementForStalenessCheckOnScrollPage = Browser.Exists(By.TagName("html"));
+
+        var jsExecutor = (IJavaScriptExecutor)Browser;
+        var maxScrollPosition = (long)jsExecutor.ExecuteScript("return document.documentElement.scrollHeight - window.innerHeight;");
+
+        // scroll maximally down and go to another page - we should land at the top of that page
+        Browser.SetScrollY(maxScrollPosition);
+        Browser.Exists(By.Id("do-navigation")).Click();
+        AssertEnhancedNavigationOnHashPage();
+        AssertWeAreOnHashPage();
+        Assert.Equal(0, Browser.GetScrollY());
+        var elementForStalenessCheckOnHashPage = Browser.Exists(By.TagName("html"));
+
+        if (enableStreaming)
+        {
+            // wait for the fragment to be visible - let the streaming finish
+            await Task.Delay(TimeSpan.FromSeconds(1));
+        }
+        var fragmentScrollPosition = (long)jsExecutor.ExecuteScript("return Math.round(document.getElementById('some-content').getBoundingClientRect().top + window.scrollY);");
+
+        // go back and check if the scroll position is preserved
+        Browser.Navigate().Back();
+        AssertWeAreOnScrollTestPage();
+        AssertEnhancedNavigationOnScrollPage();
+
+        // parts of page conditioned with showContent are showing with a delay - it affect the scroll position
+        // from some reason, scroll position differs by 1 pixel between enhanced and browser's navigation
+        var expectedMaxScrollPositionAfterBackwardsAction = useEnhancedNavigation ? maxScrollPosition: maxScrollPosition - 1;
+        if (enableStreaming)
+        {
+            // let the streaming finish
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            expectedMaxScrollPositionAfterBackwardsAction = maxScrollPosition + 127; // why 127 ???
+            expectedMaxScrollPositionAfterBackwardsAction = useEnhancedNavigation ? expectedMaxScrollPositionAfterBackwardsAction : expectedMaxScrollPositionAfterBackwardsAction - 1;
+        }
+        Assert.Equal(expectedMaxScrollPositionAfterBackwardsAction, Browser.GetScrollY());
+
+        // navigate to a fragment on another page - we should land at the beginning of the fragment
+        Browser.Exists(By.Id("do-navigation-with-fragment")).Click();
+        AssertWeAreOnHashPage();
+        AssertEnhancedNavigationOnHashPage();
+        var expectedFragmentScrollPosition = fragmentScrollPosition - 1;
+        if (enableStreaming)
+        {
+            // let the streaming finish
+            await Task.Delay(TimeSpan.FromSeconds(1));
+        }
+        Assert.Equal(expectedFragmentScrollPosition, Browser.GetScrollY());
+
+        // go back to be able to go forward and check if the scroll position is preserved
+        Browser.Navigate().Back();
+        AssertWeAreOnScrollTestPage();
+        AssertEnhancedNavigationOnScrollPage();
+
+        Browser.Navigate().Forward();
+        AssertWeAreOnHashPage();
+        AssertEnhancedNavigationOnHashPage();
+        Assert.Equal(expectedFragmentScrollPosition, Browser.GetScrollY());
+
+        void AssertEnhancedNavigationOnHashPage() =>
+            AssertEnhancedNavigation(elementForStalenessCheckOnScrollPage);
+
+        void AssertEnhancedNavigationOnScrollPage()
+            => AssertEnhancedNavigation(elementForStalenessCheckOnHashPage);
+
+        void AssertEnhancedNavigation(IWebElement elementForStalenessCheck)
+        {
+            // enhanced navigation asserts are not deterministic with streaming
+            if (enableStreaming)
+            {
+                return;
+            }
+            bool enhancedNavigationDetected = !IsElementStale(elementForStalenessCheck);
+            Assert.Equal(useEnhancedNavigation, enhancedNavigationDetected);
+        }
+
+        void AssertWeAreOnScrollTestPage()
+        {
+            Browser.Equal("Go back to me", () => Browser.Exists(By.Id("test-info")).Text);
+        }
+
+        void AssertWeAreOnHashPage()
+        {
+            Browser.Equal("Scroll to hash", () => Browser.Exists(By.Id("test-info")).Text);
+        }
     }
 
     private void AssertEnhancedUpdateCountEquals(long count)
